@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -25,15 +25,7 @@ import {
   Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  collection,
-  addDoc,
-  serverTimestamp,
-  onSnapshot,
-  query,
-  orderBy
-} from 'firebase/firestore';
-import { db } from '../firebase';
+import { api } from '../api';
 import { 
   BarChart, 
   Bar, 
@@ -72,42 +64,76 @@ const currencySymbols: Record<string, string> = {
   OMR: 'ر.ع',
 };
 
-export default function Accounting({ user, isRTL, currencySettings, setCurrencySettings }: { user: any, isRTL: boolean, currencySettings: any, setCurrencySettings: any }) {
+export default function Accounting({ 
+  user, 
+  isRTL, 
+  currencySettings, 
+  setCurrencySettings, 
+  refreshData,
+  sales = [],
+  auditLogs = []
+}: { 
+  user: any, 
+  isRTL: boolean, 
+  currencySettings: any, 
+  setCurrencySettings: any, 
+  refreshData: () => void,
+  sales?: any[],
+  auditLogs?: any[]
+}) {
   const [view, setView] = useState<'journal' | 'ledger' | 'reports' | 'audit' | 'settings'>('journal');
   const [entries, setEntries] = useState<any[]>([]);
   const [selectedLedgerAccount, setSelectedLedgerAccount] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<string | null>(null);
 
-  React.useEffect(() => {
+  // Stats calculation
+  const totalSales = sales.reduce((acc, s) => acc + (s.total || 0), 0);
+  const totalCount = sales.length;
+  const avgSale = totalCount > 0 ? totalSales / totalCount : 0;
+  
+  const salesData = sales.reduce((acc: any[], sale) => {
+    const period = new Date(sale.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    let existing = acc.find(d => d.period === period);
+    if (!existing) {
+      existing = { period, sales: 0, count: 0 };
+      acc.push(existing);
+    }
+    existing.sales += sale.total;
+    existing.count += 1;
+    return acc;
+  }, []).sort((a, b) => new Date(a.period).getTime() - new Date(b.period).getTime()).slice(-7);
+
+  useEffect(() => {
     if (!user?.companyId) return;
 
-    const q = query(
-      collection(db, 'companies', user.companyId, 'journal_entries'),
-      orderBy('date', 'desc'),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const flattenedEntries: any[] = [];
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        data.lines.forEach((line: any, index: number) => {
-          flattenedEntries.push({
-            id: `${doc.id}-${index}`,
-            date: data.date,
-            description: data.description,
-            ref: data.reference || 'N/A',
-            account: line.account,
-            debit: line.debit || 0,
-            credit: line.credit || 0,
-            entryId: doc.id
+    const fetchEntries = async () => {
+      try {
+        const rawEntries = await api.generic.list(user.companyId, 'journal_entries');
+        const flattenedEntries: any[] = [];
+        
+        rawEntries.forEach((entry: any) => {
+          // Lines might be stored as JSON string in SQLite
+          const lines = typeof entry.lines === 'string' ? JSON.parse(entry.lines) : (entry.lines || []);
+          lines.forEach((line: any, index: number) => {
+            flattenedEntries.push({
+              id: `${entry.id}-${index}`,
+              date: entry.date,
+              description: entry.description,
+              ref: entry.reference || 'N/A',
+              account: line.account,
+              debit: line.debit || 0,
+              credit: line.credit || 0,
+              entryId: entry.id
+            });
           });
         });
-      });
-      setEntries(flattenedEntries);
-    });
+        setEntries(flattenedEntries);
+      } catch (err) {
+        console.error('Error fetching journal entries:', err);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchEntries();
   }, [user?.companyId]);
 
   const [showEntryModal, setShowEntryModal] = useState(false);
@@ -129,31 +155,12 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
       { account: '', debit: 0, credit: 0 }
     ]
   });
+
   const [rates, setRates] = useState(currencySettings.rates);
   const [dateRange, setDateRange] = useState({
     start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
-
-  const auditLogs = [
-    { id: 'log-1', timestamp: '2023-10-24 14:30', user: 'Ahmed Mohamed', action: 'create', entity: 'Transaction', entityId: 'INV-1024', details: 'Added new sales transaction' },
-    { id: 'log-2', timestamp: '2023-10-24 12:15', user: 'Sarah Al-Otaibi', action: 'update', entity: 'Product', entityId: 'IPH15P-256', details: 'Updated stock quantity from 10 to 15' },
-    { id: 'log-3', timestamp: '2023-10-23 09:45', user: 'Ahmed Mohamed', action: 'create', entity: 'PurchaseOrder', entityId: 'PO-5521', details: 'Created draft purchase order for Global Tech' },
-  ];
-
-  const salesData = [
-    { period: 'Mon', sales: 4500, count: 12 },
-    { period: 'Tue', sales: 5200, count: 15 },
-    { period: 'Wed', sales: 3800, count: 10 },
-    { period: 'Thu', sales: 6100, count: 18 },
-    { period: 'Fri', sales: 7500, count: 22 },
-    { period: 'Sat', sales: 8200, count: 25 },
-    { period: 'Sun', sales: 5900, count: 16 },
-  ];
-
-  const totalSales = salesData.reduce((acc, curr) => acc + curr.sales, 0);
-  const totalCount = salesData.reduce((acc, curr) => acc + curr.count, 0);
-  const avgSale = totalSales / totalCount;
 
   const handleUpdateRate = (curr: string, rate: number) => {
     const newRates = { ...rates, [curr]: rate };
@@ -203,21 +210,19 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
         totalDebit,
         totalCredit,
         createdAt: new Date().toISOString(),
-        createdBy: user.uid,
-        serverTimestamp: serverTimestamp()
+        createdBy: user.id
       };
 
-      await addDoc(collection(db, 'companies', user.companyId, 'journal_entries'), entryData);
+      await api.generic.create(user.companyId, 'journal_entries', entryData);
 
       // Also create audit log
-      await addDoc(collection(db, 'companies', user.companyId, 'audit_logs'), {
+      await api.generic.create(user.companyId, 'audit_logs', {
         timestamp: new Date().toISOString(),
-        user: user.displayName || user.email,
+        user: user.email,
         action: 'create',
         entity: 'JournalEntry',
         entityId: entryForm.reference || 'N/A',
-        details: `Created multi-line journal entry: ${entryForm.description}`,
-        serverTimestamp: serverTimestamp()
+        details: `Created multi-line journal entry: ${entryForm.description}`
       });
 
       setShowEntryModal(false);
@@ -230,7 +235,7 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
           { account: '', debit: 0, credit: 0 }
         ]
       });
-      
+      refreshData();
       alert(isRTL ? 'تم حفظ القيد بنجاح' : 'Journal entry saved successfully');
     } catch (error) {
       console.error('Error saving journal entry:', error);
@@ -257,22 +262,20 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
           { account: expenseForm.paymentMethod, debit: 0, credit: amount }
         ],
         createdAt: new Date().toISOString(),
-        createdBy: user.uid,
-        serverTimestamp: serverTimestamp(),
+        createdBy: user.id,
         type: 'Expense'
       };
 
-      await addDoc(collection(db, 'companies', user.companyId, 'journal_entries'), entryData);
+      await api.generic.create(user.companyId, 'journal_entries', entryData);
 
       // Audit log
-      await addDoc(collection(db, 'companies', user.companyId, 'audit_logs'), {
+      await api.generic.create(user.companyId, 'audit_logs', {
         timestamp: new Date().toISOString(),
-        user: user.displayName || user.email,
+        user: user.email,
         action: 'create',
         entity: 'ExpenseEntry',
         entityId: expenseForm.reference || 'N/A',
-        details: `Recorded expense: ${expenseForm.description} - ${amount}`,
-        serverTimestamp: serverTimestamp()
+        details: `Recorded expense: ${expenseForm.description} - ${amount}`
       });
 
       setShowExpenseModal(false);
@@ -284,7 +287,7 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
         paymentMethod: 'Cash',
         reference: ''
       });
-      
+      refreshData();
       alert(isRTL ? 'تم تسجيل المصروف بنجاح' : 'Expense recorded successfully');
     } catch (err) {
       console.error('Error recording expense:', err);
@@ -1146,9 +1149,9 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <div className="w-7 h-7 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-[10px] font-bold">
-                            {log.user.charAt(0)}
+                            {(log.userName || 'U').charAt(0)}
                           </div>
-                          <span className="text-sm font-medium text-slate-700">{log.user}</span>
+                          <span className="text-sm font-medium text-slate-700">{log.userName}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -1163,9 +1166,9 @@ export default function Accounting({ user, isRTL, currencySettings, setCurrencyS
                           ) : log.action}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-slate-600 font-medium">{log.entity}</td>
+                      <td className="px-6 py-4 text-sm text-slate-600 font-medium">{log.entityType}</td>
                       <td className="px-6 py-4 text-xs font-mono text-slate-400">{log.entityId}</td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{log.details}</td>
+                      <td className="px-6 py-4 text-sm text-slate-500">{log.details || log.changes}</td>
                     </tr>
                   ))}
                 </tbody>

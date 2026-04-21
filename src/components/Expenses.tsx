@@ -15,8 +15,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../firebase';
-import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import { api } from '../api';
 import { cn } from '../lib/utils';
 
 interface Expense {
@@ -29,7 +28,7 @@ interface Expense {
   reference?: string;
 }
 
-export default function Expenses({ isRTL, user, expenses }: { isRTL: boolean, user: any, expenses: any[] }) {
+export default function Expenses({ isRTL, user, expenses, refreshData }: { isRTL: boolean, user: any, expenses: any[], refreshData: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   
@@ -75,7 +74,7 @@ export default function Expenses({ isRTL, user, expenses }: { isRTL: boolean, us
     };
 
     try {
-      await addDoc(collection(db, 'companies', user.companyId, 'expenses'), newExpense);
+      await api.generic.create(user.companyId, 'expenses', newExpense);
       setShowModal(false);
       setExpenseForm({
         description: '',
@@ -85,6 +84,7 @@ export default function Expenses({ isRTL, user, expenses }: { isRTL: boolean, us
         date: new Date().toISOString().split('T')[0],
         reference: ''
       });
+      refreshData();
     } catch (err) {
       console.error('Error adding expense:', err);
     }
@@ -94,7 +94,8 @@ export default function Expenses({ isRTL, user, expenses }: { isRTL: boolean, us
     if (!user?.companyId || !window.confirm(isRTL ? 'هل أنت متأكد من حذف هذا المصروف؟' : 'Are you sure you want to delete this expense?')) return;
     
     try {
-      await deleteDoc(doc(db, 'companies', user.companyId, 'expenses', String(id)));
+      await api.generic.delete(user.companyId, 'expenses', String(id));
+      refreshData();
     } catch (err) {
       console.error('Error deleting expense:', err);
     }

@@ -13,8 +13,7 @@ import {
   Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, increment } from 'firebase/firestore';
+import { api } from '../api';
 import { cn } from '../lib/utils';
 
 interface DamagedEntry {
@@ -28,7 +27,7 @@ interface DamagedEntry {
   location: string;
 }
 
-export default function Damaged({ isRTL, products, user, damagedItems }: { isRTL: boolean, products: any[], user: any, damagedItems: any[] }) {
+export default function Damaged({ isRTL, products, user, damagedItems, refreshData }: { isRTL: boolean, products: any[], user: any, damagedItems: any[], refreshData: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   
@@ -67,13 +66,12 @@ export default function Damaged({ isRTL, products, user, damagedItems }: { isRTL
     };
 
     try {
-      await addDoc(collection(db, 'companies', user.companyId, 'damaged_items'), newDamaged);
+      await api.generic.create(user.companyId, 'damaged_items', newDamaged);
       
       // Update stock if product found
       if (selectedProduct) {
-        const productRef = doc(db, 'companies', user.companyId, 'products', String(selectedProduct.id));
-        await updateDoc(productRef, {
-          stock: increment(-qty)
+        await api.products.update(user.companyId, selectedProduct.id, {
+          stock: (selectedProduct.stock || 0) - qty
         });
       }
 
@@ -87,6 +85,7 @@ export default function Damaged({ isRTL, products, user, damagedItems }: { isRTL
         location: 'Main Warehouse',
         date: new Date().toISOString().split('T')[0]
       });
+      refreshData();
     } catch (err) {
       console.error('Error recording damaged item:', err);
     }
@@ -96,7 +95,8 @@ export default function Damaged({ isRTL, products, user, damagedItems }: { isRTL
     if (!user?.companyId || !window.confirm(isRTL ? 'هل أنت متأكد من حذف هذا السجل؟' : 'Are you sure you want to delete this record?')) return;
     
     try {
-      await deleteDoc(doc(db, 'companies', user.companyId, 'damaged_items', String(id)));
+      await api.generic.delete(user.companyId, 'damaged_items', String(id));
+      refreshData();
     } catch (err) {
       console.error('Error deleting damaged item:', err);
     }

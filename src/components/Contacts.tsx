@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -20,8 +20,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { api } from '../api';
 import { cn } from '../lib/utils';
 
 interface PurchaseOrderItem {
@@ -63,13 +62,15 @@ export default function Contacts({
   products = [], 
   currencySettings, 
   contacts = [], 
-  user
+  user,
+  refreshData
 }: { 
   isRTL: boolean, 
   products?: any[], 
   currencySettings?: any,
   contacts?: any[],
-  user: any
+  user: any,
+  refreshData: () => void
 }) {
   const [filter, setFilter] = useState<'all' | 'Customer' | 'Supplier'>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -104,7 +105,7 @@ export default function Contacts({
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
   // Reset filters when contact changes
-  React.useEffect(() => {
+  useEffect(() => {
     setTxTypeFilter('all');
     setTxStatusFilter('all');
     setDetailTab('history');
@@ -113,32 +114,23 @@ export default function Contacts({
     setLocalNotes(selectedContact?.notes || '');
   }, [selectedContact?.id]);
 
-  // Fetch Purchase Orders and Sales Orders
-  React.useEffect(() => {
+  // Fetch Purchase Orders and Sales Orders via API
+  useEffect(() => {
     if (!user?.companyId) return;
 
-    const poQuery = query(
-      collection(db, 'companies', user.companyId, 'purchase_orders'),
-      orderBy('date', 'desc')
-    );
-    const unsubscribePO = onSnapshot(poQuery, (snapshot) => {
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PurchaseOrder));
-      setPurchaseOrders(orders);
-    });
-
-    const soQuery = query(
-      collection(db, 'companies', user.companyId, 'sales_orders'),
-      orderBy('date', 'desc')
-    );
-    const unsubscribeSO = onSnapshot(soQuery, (snapshot) => {
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SalesOrder));
-      setSalesOrders(orders);
-    });
-
-    return () => {
-      unsubscribePO();
-      unsubscribeSO();
+    const fetchOrders = async () => {
+      try {
+        const [pos, sos] = await Promise.all([
+          api.generic.list(user.companyId, 'purchase_orders'),
+          api.generic.list(user.companyId, 'sales_orders')
+        ]);
+        setPurchaseOrders(pos);
+        setSalesOrders(sos);
+      } catch (err) {
+        console.error('Error fetching orders:', err);
+      }
     };
+    fetchOrders();
   }, [user?.companyId]);
 
   const filteredContacts = contacts.filter(c => {
@@ -160,7 +152,7 @@ export default function Contacts({
     if (!newContact.name || !user?.companyId) return;
     
     try {
-      await addDoc(collection(db, 'companies', user.companyId, 'contacts'), {
+      await api.generic.create(user.companyId, 'contacts', {
         ...newContact,
         balance: 0,
         createdAt: new Date().toISOString()
@@ -170,6 +162,7 @@ export default function Contacts({
         name: '', type: 'Customer', phone: '', email: '', address: '', taxId: '',
         paymentMethod: '', creditPeriod: '', creditLimit: '', salesRep: '', category: ''
       });
+      refreshData();
     } catch (err) {
       console.error('Error adding contact:', err);
     }
@@ -183,7 +176,7 @@ export default function Contacts({
         const orderNumber = `PO-${Math.floor(1000 + Math.random() * 9000)}`;
         const total = orderItems.reduce((sum, item) => sum + (item.cost * item.quantity), 0);
         
-        await addDoc(collection(db, 'companies', user.companyId, 'purchase_orders'), {
+        await api.generic.create(user.companyId, 'purchase_orders', {
           orderNumber,
           supplierId: selectedContact.id,
           date: new Date().toISOString().split('T')[0],
@@ -200,7 +193,7 @@ export default function Contacts({
         const orderNumber = `SO-${Math.floor(1000 + Math.random() * 9000)}`;
         const total = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         
-        await addDoc(collection(db, 'companies', user.companyId, 'sales_orders'), {
+        await api.generic.create(user.companyId, 'sales_orders', {
           orderNumber,
           customerId: selectedContact.id,
           date: new Date().toISOString().split('T')[0],
@@ -216,6 +209,14 @@ export default function Contacts({
       }
       setShowOrderModal(false);
       setOrderItems([]);
+      refreshData();
+      // Re-fetch orders locally
+      const [pos, sos] = await Promise.all([
+        api.generic.list(user.companyId, 'purchase_orders'),
+        api.generic.list(user.companyId, 'sales_orders')
+      ]);
+      setPurchaseOrders(pos);
+      setSalesOrders(sos);
     } catch (err) {
       console.error('Error creating order:', err);
     }
@@ -257,16 +258,16 @@ export default function Contacts({
     
     try {
       const collectionName = orderId.startsWith('PO-') ? 'purchase_orders' : 'sales_orders';
-      // Note: orderId here is the Firestore document ID, but the UI might be passing orderNumber
-      // I should make sure I'm using the document ID
       const order = orderId.startsWith('PO-') 
         ? purchaseOrders.find(po => po.id === orderId)
         : salesOrders.find(so => so.id === orderId);
       
       if (order) {
-        await updateDoc(doc(db, 'companies', user.companyId, collectionName, order.id), {
+        await api.generic.create(user.companyId, collectionName, {
+          ...order,
           status: newStatus
         });
+        refreshData();
       }
     } catch (err) {
       console.error('Error updating order status:', err);
@@ -1043,7 +1044,7 @@ export default function Contacts({
                               if (!user?.companyId || !selectedContact) return;
                               setIsSavingNotes(true);
                               try {
-                                await updateDoc(doc(db, 'companies', user.companyId, 'contacts', selectedContact.id), {
+                                await api.generic.update(user.companyId, 'contacts', selectedContact.id, {
                                   notes: localNotes
                                 });
                               } catch (err) {

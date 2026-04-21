@@ -23,8 +23,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import Fuse from 'fuse.js';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
+import { api } from '../api';
 import { cn } from '../lib/utils';
 
 export default function POS({ 
@@ -33,14 +32,16 @@ export default function POS({
   currencySettings, 
   contacts,
   companyInfo,
-  user
+  user,
+  refreshData
 }: { 
   isRTL: boolean, 
   products: any[], 
   currencySettings: any, 
   contacts: any[],
   companyInfo: any,
-  user: any
+  user: any,
+  refreshData: () => void
 }) {
   const [cart, setCart] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -231,20 +232,25 @@ export default function POS({
     };
 
     try {
-      // Save sale to Firestore
-      const saleRef = await addDoc(collection(db, 'companies', user.companyId, 'sales'), order);
+      // Save sale to SQLite API
+      const result = await api.sales.create(user.companyId, order);
       
-      // Update stock for each item
+      // Update stock for each item using API
       for (const item of cart) {
-        const productRef = doc(db, 'companies', user.companyId, 'products', String(item.id));
-        await updateDoc(productRef, {
-          stock: increment(-item.quantity)
-        });
+        const product = products.find(p => p.id === item.id);
+        if (product) {
+          const newStock = Math.max(0, product.stock - item.quantity);
+          await api.products.update(user.companyId, String(item.id), {
+            ...product,
+            stock: newStock
+          });
+        }
       }
 
-      setLastOrder({ ...order, id: saleRef.id });
+      setLastOrder({ ...order, id: result.id });
       setShowSuccess(true);
       setCart([]);
+      if (refreshData) refreshData();
     } catch (err) {
       console.error('Error completing payment:', err);
     }

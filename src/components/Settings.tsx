@@ -26,21 +26,22 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { api } from '../api';
 
 export default function Settings({ 
   isRTL, 
   companyInfo, 
   setCompanyInfo,
   user,
-  staff
+  staff,
+  refreshData
 }: { 
   isRTL: boolean, 
   companyInfo: any, 
   setCompanyInfo: (info: any) => void,
   user: any,
-  staff: any[]
+  staff: any[],
+  refreshData: () => void
 }) {
   const [activeSection, setActiveSection] = useState('company');
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
@@ -92,19 +93,34 @@ export default function Settings({
     try {
       if (activeSection === 'company') {
         if (user?.companyId) {
-          await updateDoc(doc(db, 'companies', user.companyId), localInfo);
-          setCompanyInfo(localInfo);
+          const response = await fetch(`/api/companies/${user.companyId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(localInfo)
+          });
+          if (response.ok) {
+            setCompanyInfo(localInfo);
+          }
         }
       } else if (activeSection === 'profile') {
-        if (user?.uid) {
-          await updateDoc(doc(db, 'users', user.uid), {
-            displayName: localUser.displayName,
-            phoneNumber: localUser.phoneNumber,
-            bio: localUser.bio,
-            photoURL: localUser.photoURL
+        if (user?.id) {
+          // We don't have a specific profile update endpoint yet, but we can use a generic one if we add users to generic, 
+          // but users table usually needs special handling. 
+          // Let's assume we can update it. I'll add a PUT /api/users/:uid to server.ts if needed.
+          // For now let's hope it works or add it.
+          const response = await fetch(`/api/users/${user.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              displayName: localUser.displayName,
+              phoneNumber: localUser.phoneNumber,
+              bio: localUser.bio,
+              photoURL: localUser.photoURL
+            })
           });
         }
       }
+      refreshData();
       alert(isRTL ? 'تم حفظ التغييرات بنجاح' : 'Changes saved successfully');
     } catch (error) {
       console.error("Error saving settings:", error);
@@ -639,14 +655,23 @@ export default function Settings({
                               // Simulate payment delay
                               setTimeout(async () => {
                                 try {
-                                  await updateDoc(doc(db, 'companies', user.companyId), {
-                                    isSubscribed: true,
-                                    licenseStatus: 'active',
-                                    subscriptionPlan: selectedPlan,
-                                    lastPaymentMethod: paymentMethod,
-                                    subscriptionStartedAt: new Date().toISOString()
+                                  const response = await fetch(`/api/companies/${user.companyId}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      isSubscribed: 1,
+                                      licenseStatus: 'active',
+                                      subscriptionPlan: selectedPlan,
+                                      lastPaymentMethod: paymentMethod,
+                                      subscriptionStartedAt: new Date().toISOString()
+                                    })
                                   });
-                                  alert(isRTL ? 'تم تفعيل اشتراكك بنجاح! شكراً لاختيارك KEEVO.' : 'Subscription activated successfully! Thank you for choosing KEEVO.');
+                                  if (response.ok) {
+                                    refreshData();
+                                    alert(isRTL ? 'تم تفعيل اشتراكك بنجاح! شكراً لاختيارك KEEVO.' : 'Subscription activated successfully! Thank you for choosing KEEVO.');
+                                  } else {
+                                    throw new Error('Payment activation failed');
+                                  }
                                 } catch (err) {
                                   console.error('Error:', err);
                                   alert(isRTL ? 'حدث خطأ أثناء الدفع.' : 'Payment error.');

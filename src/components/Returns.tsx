@@ -16,8 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { api } from '../api';
 import { cn } from '../lib/utils';
 
 interface ReturnEntry {
@@ -31,7 +30,7 @@ interface ReturnEntry {
   items: any[];
 }
 
-export default function Returns({ isRTL, user, returns }: { isRTL: boolean, user: any, returns: any[] }) {
+export default function Returns({ isRTL, user, returns, refreshData }: { isRTL: boolean, user: any, returns: any[], refreshData: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   
@@ -44,7 +43,7 @@ export default function Returns({ isRTL, user, returns }: { isRTL: boolean, user
   });
 
   const filteredReturns = returns.filter(r => 
-    r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.id.toString().toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.customerSupplier.toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.reason.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -65,7 +64,7 @@ export default function Returns({ isRTL, user, returns }: { isRTL: boolean, user
     };
 
     try {
-      await addDoc(collection(db, 'companies', user.companyId, 'returns'), newReturn);
+      await api.generic.create(user.companyId, 'returns', newReturn);
       setShowModal(false);
       setReturnForm({
         type: 'Sale',
@@ -74,6 +73,7 @@ export default function Returns({ isRTL, user, returns }: { isRTL: boolean, user
         amount: '',
         date: new Date().toISOString().split('T')[0]
       });
+      refreshData();
     } catch (err) {
       console.error('Error adding return:', err);
     }
@@ -83,7 +83,8 @@ export default function Returns({ isRTL, user, returns }: { isRTL: boolean, user
     if (!user?.companyId || !window.confirm(isRTL ? 'هل أنت متأكد من حذف هذا المرتجع؟' : 'Are you sure you want to delete this return?')) return;
     
     try {
-      await deleteDoc(doc(db, 'companies', user.companyId, 'returns', String(id)));
+      await api.generic.delete(user.companyId, 'returns', String(id));
+      refreshData();
     } catch (err) {
       console.error('Error deleting return:', err);
     }

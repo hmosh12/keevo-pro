@@ -49,39 +49,93 @@ const StatCard = ({ title, value, change, icon: Icon, trend, isRTL }: any) => (
   </div>
 );
 
-export default function Dashboard({ isRTL }: { isRTL: boolean }) {
+export default function Dashboard({ 
+  isRTL, 
+  sales = [], 
+  products = [], 
+  expenses = [], 
+  returns = [], 
+  damaged = [] 
+}: { 
+  isRTL: boolean,
+  sales?: any[],
+  products?: any[],
+  expenses?: any[],
+  returns?: any[],
+  damaged?: any[]
+}) {
+  const totalSales = sales.reduce((acc, s) => acc + (s.total || 0), 0);
+  const totalExpenses = expenses.reduce((acc, e) => acc + (e.amount || 0), 0);
+  const totalReturns = returns.reduce((acc, r) => acc + (r.amount || 0), 0);
+  const totalDamaged = damaged.reduce((acc, d) => acc + (d.cost || 0), 0);
+  const netProfit = totalSales - totalExpenses - totalReturns - totalDamaged;
+  const stockCount = products.reduce((acc, p) => acc + (p.stock || 0), 0);
+
+  // Group sales for charts
+  const monthlyData = sales.reduce((acc: any[], sale) => {
+    const month = new Date(sale.date).toLocaleString('default', { month: 'short' });
+    let existing = acc.find(d => d.name === month);
+    if (!existing) {
+      existing = { name: month, sales: 0, expenses: 0 };
+      acc.push(existing);
+    }
+    existing.sales += sale.total;
+    return acc;
+  }, []);
+
+  // Merge expenses into monthlyData
+  expenses.forEach(exp => {
+    const month = new Date(exp.date).toLocaleString('default', { month: 'short' });
+    let existing = monthlyData.find(d => d.name === month);
+    if (!existing) {
+      existing = { name: month, sales: 0, expenses: 0 };
+      monthlyData.push(existing);
+    }
+    existing.expenses += exp.amount;
+  });
+
+  const chartData = monthlyData.sort((a, b) => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months.indexOf(a.name) - months.indexOf(b.name);
+  }).slice(-6);
+
+  const recentTransactions = [
+    ...sales.map(s => ({ id: `sale-${s.id}`, name: isRTL ? `فاتورة مبيعات #${s.invoiceNumber || s.id}` : `Sales Invoice #${s.invoiceNumber || s.id}`, date: s.date, amount: s.total, type: 'sale' })),
+    ...expenses.map(e => ({ id: `exp-${e.id}`, name: e.description, date: e.date, amount: -e.amount, type: 'expense' }))
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5);
+
   return (
     <div className="space-y-8">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           title={isRTL ? 'إجمالي المبيعات' : 'Total Sales'} 
-          value="$45,231.89" 
-          change="+20.1%" 
+          value={`$${totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
+          change="+100%" 
           icon={ShoppingCart} 
           trend="up"
           isRTL={isRTL}
         />
         <StatCard 
           title={isRTL ? 'إجمالي المصاريف' : 'Total Expenses'} 
-          value="$12,402.00" 
-          change="+4.5%" 
+          value={`$${totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
+          change="+100%" 
           icon={TrendingDown} 
           trend="down"
           isRTL={isRTL}
         />
         <StatCard 
           title={isRTL ? 'صافي الربح' : 'Net Profit'} 
-          value="$32,829.89" 
-          change="+12.2%" 
+          value={`$${netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
+          change="+100%" 
           icon={TrendingUp} 
           trend="up"
           isRTL={isRTL}
         />
         <StatCard 
           title={isRTL ? 'المخزون المتوفر' : 'Stock Items'} 
-          value="1,240" 
-          change="-2.4%" 
+          value={stockCount.toLocaleString()} 
+          change="0%" 
           icon={Package} 
           trend="down"
           isRTL={isRTL}
@@ -95,14 +149,10 @@ export default function Dashboard({ isRTL }: { isRTL: boolean }) {
             <h3 className="text-lg font-bold text-slate-800">
               {isRTL ? 'نظرة عامة على المبيعات' : 'Sales Overview'}
             </h3>
-            <select className="bg-slate-50 border-none text-sm font-medium text-slate-600 rounded-lg px-3 py-2 outline-none">
-              <option>{isRTL ? 'آخر 6 أشهر' : 'Last 6 Months'}</option>
-              <option>{isRTL ? 'آخر سنة' : 'Last Year'}</option>
-            </select>
           </div>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data}>
+              <AreaChart data={chartData.length > 0 ? chartData : [{ name: 'N/A', sales: 0 }]}>
                 <defs>
                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
@@ -151,7 +201,7 @@ export default function Dashboard({ isRTL }: { isRTL: boolean }) {
           </div>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
+              <BarChart data={chartData.length > 0 ? chartData : [{ name: 'N/A', sales: 0, expenses: 0 }]}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
                   dataKey="name" 
@@ -188,9 +238,6 @@ export default function Dashboard({ isRTL }: { isRTL: boolean }) {
           <h3 className="text-lg font-bold text-slate-800">
             {isRTL ? 'آخر العمليات' : 'Recent Transactions'}
           </h3>
-          <button className="text-indigo-600 text-sm font-semibold hover:underline">
-            {isRTL ? 'عرض الكل' : 'View All'}
-          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left rtl:text-right">
@@ -203,20 +250,15 @@ export default function Dashboard({ isRTL }: { isRTL: boolean }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {[
-                { id: 1, name: isRTL ? 'فاتورة مبيعات #1024' : 'Sales Invoice #1024', date: 'Oct 24, 2023', amount: '$1,200.00', status: 'Completed', color: 'emerald' },
-                { id: 2, name: isRTL ? 'شراء مخزون - مورد أ' : 'Inventory Purchase - Supplier A', date: 'Oct 23, 2023', amount: '-$450.00', status: 'Pending', color: 'amber' },
-                { id: 3, name: isRTL ? 'فاتورة مبيعات #1023' : 'Sales Invoice #1023', date: 'Oct 22, 2023', amount: '$850.00', status: 'Completed', color: 'emerald' },
-                { id: 4, name: isRTL ? 'مصاريف كهرباء' : 'Electricity Bill', date: 'Oct 21, 2023', amount: '-$120.00', status: 'Completed', color: 'emerald' },
-              ].map((row) => (
+              {recentTransactions.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className={cn(
                         "w-8 h-8 rounded-lg flex items-center justify-center",
-                        row.amount.startsWith('-') ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"
+                        row.amount < 0 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"
                       )}>
-                        {row.amount.startsWith('-') ? <TrendingDown size={16} /> : <TrendingUp size={16} />}
+                        {row.amount < 0 ? <TrendingDown size={16} /> : <TrendingUp size={16} />}
                       </div>
                       <span className="font-medium text-slate-700">{row.name}</span>
                     </div>
@@ -224,14 +266,14 @@ export default function Dashboard({ isRTL }: { isRTL: boolean }) {
                   <td className="px-6 py-4 text-slate-500 text-sm">{row.date}</td>
                   <td className={cn(
                     "px-6 py-4 font-bold",
-                    row.amount.startsWith('-') ? "text-rose-600" : "text-emerald-600"
-                  )}>{row.amount}</td>
+                    row.amount < 0 ? "text-rose-600" : "text-emerald-600"
+                  )}>${Math.abs(row.amount).toFixed(2)}</td>
                   <td className="px-6 py-4">
                     <span className={cn(
                       "px-2.5 py-1 rounded-full text-xs font-semibold",
-                      row.color === 'emerald' ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                      row.amount >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
                     )}>
-                      {row.status}
+                      {row.amount >= 0 ? 'Completed' : 'Expense'}
                     </span>
                   </td>
                 </tr>
